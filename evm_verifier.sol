@@ -14,12 +14,39 @@ contract Verifier {
     // NftOrigins Pallet in Tinkernet
     uint8 public constant PALLET_INDEX = 74;
     // dispatch_registered_call_as_nft call in NftOrigins Pallet
-    uint8 public constant CALL_INDEX = 3;
+    uint8 public constant CALL_INDEX = 1;
 
     address public owner;
 
+    XcmTransactorV3.Multilocation internal xcmTransactorDestination;
+    XcmTransactorV3.Multilocation internal xcmTransactorFeeAsset;
+
     constructor() {
         owner = msg.sender;
+
+        bytes[] memory destInterior = new bytes[](1);
+        destInterior[0] = bytes.concat(hex"00", bytes4(uint32(2125)));
+        xcmTransactorDestination = XcmTransactorV3.Multilocation({
+            parents: 1,
+            interior: destInterior
+        });
+
+        bytes[] memory assetInterior = new bytes[](2);
+        assetInterior[0] = bytes.concat(hex"00", bytes4(uint32(2125)));
+        assetInterior[1] = bytes.concat(hex"05", abi.encodePacked(uint128(0)));
+        xcmTransactorFeeAsset = XcmTransactorV3.Multilocation({
+            parents: 1,
+            interior: assetInterior
+        });
+    }
+
+     event Test(
+        address _contract,
+        uint256 _nft
+     );
+
+    function test(address _contract, uint256 _nft) external {
+        emit Test(_contract, _nft);
     }
 
     function send_message(address _contract, uint256 _nft) external {
@@ -29,26 +56,25 @@ contract Verifier {
 
         require(IERC721(_contract).ownerOf(_nft) == caller, "Caller is not the owner of the NFT provided");
 
-        // Send XCM
+        // TODO: Send tokens to be used for paying fees.
 
-        bytes[] memory dest_interior = new bytes[](0x000000084D);
-        bytes[] memory asset_interior = new bytes[](0x000000084D060000);
+        // Send XCM
 
         bytes memory call_data = build_call(_contract, _nft);
 
         XcmTransactorV3(XCM_TRANSACTOR_V3_ADDRESS).transactThroughSignedMultilocation(
             // Destination MultiLocation
-            XcmTransactorV3.Multilocation(1, dest_interior),
+            xcmTransactorDestination,
             // Fee MultiLocation
-            XcmTransactorV3.Multilocation(1, asset_interior),
+            xcmTransactorFeeAsset,
             // Max weight
-            XcmTransactorV3.Weight(50000000, 100000),
+            XcmTransactorV3.Weight(4000000, 82000),
             // Call
             call_data,
             // Fee amount
             2000000000000,
             // Overall weight
-            XcmTransactorV3.Weight(50000000, 100000),
+            XcmTransactorV3.Weight(1000000000, 82000),
             // Refund
             true
         );
