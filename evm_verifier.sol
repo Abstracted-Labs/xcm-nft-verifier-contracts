@@ -45,22 +45,53 @@ contract Verifier {
         uint256 _nft
      );
 
-    function test(address _contract, uint256 _nft) external {
-        emit Test(_contract, _nft);
+    event Call(bytes call);
+
+    enum Operation {
+        Vote
     }
 
-    function send_message(address _contract, uint256 _nft) external {
+    struct FeeInfo {
+        XcmTransactorV3.Weight transactRequiredWeightAtMost;
+        XcmTransactorV3.Weight overallWeight;
+        uint256 feeAmount;
+    }
+
+    mapping(Operation => FeeInfo) public operationToFeeInfo;
+
+    function test(address _contract, uint256 _nft, uint32 core_id, bytes32 proposal) external {
+        build_call(_contract, _nft, core_id, proposal);
+    }
+
+    function setOperationToFeeInfo(
+        Operation _operation,
+        uint64 _transactRequiredWeightAtMostRefTime,
+        uint64 _transactRequiredWeightAtMostProofSize,
+        uint64 _overallWeightRefTime,
+        uint64 _overallWeightProofSize,
+        uint256 _feeAmount
+    ) external {
+        require(msg.sender == owner);
+
+        operationToFeeInfo[_operation] = FeeInfo(
+            XcmTransactorV3.Weight(_transactRequiredWeightAtMostRefTime, _transactRequiredWeightAtMostProofSize),
+            XcmTransactorV3.Weight(_overallWeightRefTime, _overallWeightProofSize),
+            _feeAmount
+        );
+    }
+
+    function send_message(address _contract, uint256 _nft, uint32 core_id, bytes32 proposal) external {
         // Verify if caller owns NFT
 
-        address caller = msg.sender;
+        // address caller = msg.sender;
 
-        require(IERC721(_contract).ownerOf(_nft) == caller, "Caller is not the owner of the NFT provided");
-
-        // TODO: Send tokens to be used for paying fees.
+        // require(IERC721(_contract).ownerOf(_nft) == caller, "Caller is not the owner of the NFT provided");
 
         // Send XCM
 
-        bytes memory call_data = build_call(_contract, _nft);
+        bytes memory call_data = build_call(_contract, _nft, core_id, proposal);
+
+        FeeInfo memory fee_info = operationToFeeInfo[Operation.Vote];
 
         XcmTransactorV3(XCM_TRANSACTOR_V3_ADDRESS).transactThroughSignedMultilocation(
             // Destination MultiLocation
@@ -68,28 +99,39 @@ contract Verifier {
             // Fee MultiLocation
             xcmTransactorFeeAsset,
             // Max weight
-            XcmTransactorV3.Weight(4000000, 82000),
+            fee_info.transactRequiredWeightAtMost,
             // Call
             call_data,
             // Fee amount
-            2000000000000,
+            fee_info.feeAmount,
             // Overall weight
-            XcmTransactorV3.Weight(1000000000, 82000),
+            fee_info.overallWeight,
             // Refund
             true
         );
     }
 
-    function build_call(address _contract, uint256 _nft) internal pure returns (bytes memory) {
+    function build_call(address _contract, uint256 _nft, uint32 core_id, bytes32 proposal) internal returns (bytes memory) {
         bytes memory prefix = new bytes(2);
         prefix[0] = bytes1(PALLET_INDEX);
         prefix[1] = bytes1(CALL_INDEX);
 
-        return bytes.concat(
+        bytes memory vote_call = bytes.concat(
+            bytes1(uint8(0)),
+            ScaleCodec.encodeU32(core_id),
+            proposal,
+            bytes1(uint8(1))
+        );
+
+        bytes memory final_call = bytes.concat(
             prefix,
             abi.encodePacked(COLLECTION_CONTRACT_20, _contract),
             abi.encodePacked(NFT_U256_ID, ScaleCodec.encodeU256(_nft)),
-            bytes1(uint8(1))
+            vote_call
         );
+
+        emit Call(final_call);
+
+        return final_call;
     }
 }
